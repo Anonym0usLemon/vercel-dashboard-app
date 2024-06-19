@@ -8,37 +8,66 @@ import { redirect } from 'next/navigation';
 // Some validation library Next.js docs recommended for form data validation
 const FormSchema = z.object({
   id: z.string(),
-  customerId: z.string(),
-  amount: z.coerce.number(),
-  status: z.enum(['pending', 'paid']),
+  customerId: z.string({
+    invalid_type_error: 'Please select a customer.'
+  }),
+  amount: z.coerce
+    .number()
+    .gt(0, { message: 'Please enter an amount greater than $0.'}),
+  status: z.enum(['pending', 'paid'], {
+    invalid_type_error: 'Please select an invoice status.'
+  }), 
   date: z.string(),
 })
 
 // Makes it so that you don't need to pass the ID or DATE fields to the object in order to validate. 
 const CreateInvoice = FormSchema.omit({ id: true, date: true }); 
+
+export type State = {
+  errors?: {
+    customerId?: string[];
+    amount?: string[];
+    status?: string[];
+  };
+  message?: string | null;
+};
  
-export async function createInvoice(formData: FormData) {
-  const { customerId, amount, status } = CreateInvoice.parse({
+export async function createInvoice(prevState: State, formData: FormData) {
+  // Validate form using Zod
+  const valdiatedFields = CreateInvoice.safeParse({
     customerId: formData.get('customerId'),
     amount: formData.get('amount'),
     status: formData.get('status'),
   });
+
+  // If form validation fails, return errors early. Otherwise, continue. 
+  if (!valdiatedFields.success) {
+    return {
+      errors: valdiatedFields.error.flatten().fieldErrors,
+      message: 'Missing Fields. Failed to Create Invoice'
+    }
+  }
+
+  // Prepare data for insertion into the database
+  const { customerId, amount, status } = valdiatedFields.data;
   const amountInCents = amount * 100; 
   const date = new Date().toISOString().split('T')[0];
 
   // Next.js magically knows where and how to send this to the db through the .env file?
+  // Insert data into the database 
   try {
     await sql`
     INSERT INTO invoices (customer_id, amount, status, date)
     VALUES (${customerId}, ${amountInCents}, ${status}, ${date})
     `; 
   } catch(error) {
+    // If a database error occurs, return a more specific error.
     return {
       message: 'Database Error: Failed to Create Invoice',
     };
   }
 
-  // Clears the Client-Side Router Cache. 
+  // Clears the Client-Side Router Cache for the invoices page and redirects the user. . 
   revalidatePath('/dashboard/invoices');
 
   // Self Explanatory...
