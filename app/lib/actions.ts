@@ -1,27 +1,29 @@
 'use server';
 
-import { z } from 'zod'; 
+import { z } from 'zod';
 import { sql } from '@vercel/postgres';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
+import { signIn } from '@/auth';
+import { AuthError } from 'next-auth';
 
 // Some validation library Next.js docs recommended for form data validation
 const FormSchema = z.object({
   id: z.string(),
   customerId: z.string({
-    invalid_type_error: 'Please select a customer.'
+    invalid_type_error: 'Please select a customer.',
   }),
   amount: z.coerce
     .number()
-    .gt(0, { message: 'Please enter an amount greater than $0.'}),
+    .gt(0, { message: 'Please enter an amount greater than $0.' }),
   status: z.enum(['pending', 'paid'], {
-    invalid_type_error: 'Please select an invoice status.'
-  }), 
+    invalid_type_error: 'Please select an invoice status.',
+  }),
   date: z.string(),
-})
+});
 
-// Makes it so that you don't need to pass the ID or DATE fields to the object in order to validate. 
-const CreateInvoice = FormSchema.omit({ id: true, date: true }); 
+// Makes it so that you don't need to pass the ID or DATE fields to the object in order to validate.
+const CreateInvoice = FormSchema.omit({ id: true, date: true });
 
 export type State = {
   errors?: {
@@ -31,7 +33,7 @@ export type State = {
   };
   message?: string | null;
 };
- 
+
 export async function createInvoice(prevState: State, formData: FormData) {
   // Validate form using Zod
   const valdiatedFields = CreateInvoice.safeParse({
@@ -40,34 +42,34 @@ export async function createInvoice(prevState: State, formData: FormData) {
     status: formData.get('status'),
   });
 
-  // If form validation fails, return errors early. Otherwise, continue. 
+  // If form validation fails, return errors early. Otherwise, continue.
   if (!valdiatedFields.success) {
     return {
       errors: valdiatedFields.error.flatten().fieldErrors,
-      message: 'Missing Fields. Failed to Create Invoice'
-    }
+      message: 'Missing Fields. Failed to Create Invoice',
+    };
   }
 
   // Prepare data for insertion into the database
   const { customerId, amount, status } = valdiatedFields.data;
-  const amountInCents = amount * 100; 
+  const amountInCents = amount * 100;
   const date = new Date().toISOString().split('T')[0];
 
   // Next.js magically knows where and how to send this to the db through the .env file?
-  // Insert data into the database 
+  // Insert data into the database
   try {
     await sql`
     INSERT INTO invoices (customer_id, amount, status, date)
     VALUES (${customerId}, ${amountInCents}, ${status}, ${date})
-    `; 
-  } catch(error) {
+    `;
+  } catch (error) {
     // If a database error occurs, return a more specific error.
     return {
       message: 'Database Error: Failed to Create Invoice',
     };
   }
 
-  // Clears the Client-Side Router Cache for the invoices page and redirects the user. . 
+  // Clears the Client-Side Router Cache for the invoices page and redirects the user. .
   revalidatePath('/dashboard/invoices');
 
   // Self Explanatory...
@@ -76,11 +78,15 @@ export async function createInvoice(prevState: State, formData: FormData) {
 
 const UpdateInvoice = FormSchema.omit({ id: true, date: true });
 
-export async function updateInvoice(id: string, prevState: State, formData: FormData) {
+export async function updateInvoice(
+  id: string,
+  prevState: State,
+  formData: FormData,
+) {
   const validatedFields = UpdateInvoice.safeParse({
     customerId: formData.get('customerId'),
     amount: formData.get('amount'),
-    status: formData.get('status'), 
+    status: formData.get('status'),
   });
 
   if (!validatedFields.success) {
@@ -91,33 +97,51 @@ export async function updateInvoice(id: string, prevState: State, formData: Form
   }
   const { customerId, amount, status } = validatedFields.data;
   const amountInCents = amount * 100;
-  
+
   try {
     await sql`
     UPDATE invoices
     SET customer_id = ${customerId}, amount = ${amountInCents}, status = ${status}
     WHERE id = ${id}
     `;
-  } catch(error) {
+  } catch (error) {
     return {
       message: 'Database Error: Failed to Update Invoice',
     };
   }
 
   // Clear the cache
-  revalidatePath('/dashboard/invoices')
+  revalidatePath('/dashboard/invoices');
   redirect('/dashboard/invoices');
 }
 
 export async function deleteInvoice(id: string) {
-
   try {
     await sql`DELETE FROM invoices WHERE id = ${id}`;
-  } catch(error) {
+  } catch (error) {
     return {
       message: 'Database Error: Failed to Delete Invoice',
     };
   }
 
   revalidatePath('/dashboard/invoices');
+}
+
+export async function authenticate(
+  prevState: string | undefined,
+  formData: FormData,
+) {
+  try {
+    await signIn('credentials', formData);
+  } catch (error) {
+    if (error instanceof AuthError) {
+      switch (error.type) {
+        case 'CredentialsSignin':
+          return 'Invalid credentials.';
+        default:
+          return 'Something went wrong.';
+      }
+    }
+    throw error;
+  }
 }
