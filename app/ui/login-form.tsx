@@ -61,7 +61,7 @@ export default function LoginForm() {
             </div>
           </div>
         </div>
-        <button className="mt-4 w-full">
+        <button type="submit" className="mt-4 w-full">
           Log in <ArrowRightIcon className="ml-auto h-5 w-5 text-gray-50" />
         </button>
         <div className="flex h-8 items-end space-x-1">
